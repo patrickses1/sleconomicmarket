@@ -1,0 +1,176 @@
+
+
+res.json({ ok: true, payment: pay });
+} catch (e) { console.error(e); res.status(500).json({ error: 'Approve 
+failed' }); }
+});
+
+
+app.post('/admin/payments/:id/reject', auth(true), requireAdmin, async 
+(req, res) => {
+try {
+const { id } = req.params;
+const pays = await q(`UPDATE payments SET status='rejected' WHERE id=$1 
+AND status='pending' RETURNING *`, [id]);
+const pay = pays[0];
+if (!pay) return res.status(404).json({ error: 'Payment not found or 
+already processed' });
+
+
+await q(`INSERT INTO admin_actions (admin_user_id, target_type, target_id, 
+action, meta) VALUES ($1,'payment',$2,'reject', $3::jsonb)`,
+[req.user.id, id, JSON.stringify({ reason: 'manual reject' })]);
+
+
+res.json({ ok: true, payment: pay });
+} catch (e) { console.error(e); res.status(500).json({ error: 'Reject 
+failed' }); }
+});
+
+
+// Approve listing (e.g., News moderation)
+app.post('/admin/listings/:id/approve', auth(true), requireAdmin, async 
+(req, res) => {
+try {
+const { id } = req.params;
+const rows = await q(`UPDATE listings SET status='active' WHERE id=$1 
+RETURNING *`, [id]);
+const listing = rows[0];
+if (!listing) return res.status(404).json({ error: 'Listing not found' });
+await q(`INSERT INTO admin_actions (admin_user_id, target_type, target_id, 
+action) VALUES ($1,'listing',$2,'approve')`, [req.user.id, id]);
+res.json(listing);
+} catch (e) { console.error(e); res.status(500).json({ error: 'Approve 
+listing failed' }); }
+});
+
+
+app.post('/admin/listings/:id/block', auth(true), requireAdmin, async 
+(req, res) => {
+try {
+const { id } = req.params;
+const rows = await q(`UPDATE listings SET status='blocked' WHERE id=$1 
+RETURNING *`, [id]);
+const listing = rows[0];
+if (!listing) return res.status(404).json({ error: 'Listing not found' });
+await q(`INSERT INTO admin_actions (admin_user_id, target_type, target_id, 
+action) VALUES ($1,'listing',$2,'block')`, [req.user.id, id]);
+res.json(listing);
+} catch (e) { console.error(e); res.status(500).json({ error: 'Block 
+listing failed' }); }
+});
+
+
+// --- Helper: seed an admin (one‑time)
+app.post('/dev/seed-admin', async (req, res) => {
+try {
+const { email, password } = req.body;
+if (!email || !password) return res.status(400).json({ error: 'email & 
+password required' });
+const hash = await bcrypt.hash(password, 10);
+const rows = await q(`INSERT INTO users (email, password_hash, role) 
+VALUES ($1,$2,'ADMIN')
+ON CONFLICT (email) DO UPDATE SET role='ADMIN' RETURNING id, email, role`, 
+[email.toLowerCase(), hash]);
+res.json(rows[0]);
+} catch (e) { console.error(e); res.status(500).json({ error: 'Seed admin 
+failed' }); }
+});
+
+
+// --- Start
+app.listen(PORT, () => console.log(`Sleconomicmarket API running on 
+:${PORT}`));
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+
+-- OTPs (demo storage)
+CREATE TABLE IF NOT EXISTS otps (
+id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+code TEXT NOT NULL,
+expires_at TIMESTAMPTZ NOT NULL,
+consumed BOOLEAN NOT NULL DEFAULT false,
+created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+
+-- Listings
+CREATE TABLE IF NOT EXISTS listings (
+id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+category TEXT NOT NULL CHECK (category IN 
+('goods','rentals','services','jobs','bloggers','news')),
+title TEXT NOT NULL,
+description TEXT,
+price_cents INTEGER,
+currency TEXT NOT NULL DEFAULT 'NLE',
+boosted_until TIMESTAMPTZ,
+status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN 
+('pending','active','blocked')),
+id_doc_path TEXT, -- services require this
+created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+
+-- Payments
+CREATE TABLE IF NOT EXISTS payments (
+id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+listing_id UUID REFERENCES listings(id) ON DELETE CASCADE,
+purpose TEXT NOT NULL CHECK (purpose IN ('post_fee','boost')),
+method TEXT NOT NULL CHECK (method IN ('stripe','manual')),
+status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN 
+('pending','paid','rejected')),
+amount_cents INTEGER NOT NULL,
+currency TEXT NOT NULL DEFAULT 'NLE',
+provider_ref TEXT, -- stripe session id or mobile money ref
+proof_path TEXT, -- manual screenshot path
+created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+
+-- Admin action log (optional)
+CREATE TABLE IF NOT EXISTS admin_actions (
+id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+admin_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+target_type TEXT NOT NULL,
+target_id UUID,
+action TEXT NOT NULL,
+meta JSONB,
+created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+
+-- Simple indexes
+CREATE INDEX IF NOT EXISTS idx_listings_category ON listings(category);
+CREATE INDEX IF NOT EXISTS idx_listings_status ON listings(status);
+CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
+
+# Server
+PORT=4000
+JWT_SECRET=supersecret_change_me
+
+
+# Postgres
+PGHOST=localhost
+PGPORT=5432
+PGDATABASE=sleco_db
+PGUSER=postgres
+PGPASSWORD=slecopat1yd
+
+
+# Stripe (optional: if omitted, Stripe endpoints will 400)
+STRIPE_SECRET=
+STRIPE_WEBHOOK_SECRET=
+
+
+# App
+APP_BASE_URL=http://localhost:4000
+FRONTEND_ORIGIN=http://localhost:3000
+DEFAULT_CURRENCY=NLE
+# Posting fee for Services/Jobs in NLE cents (e.g., NLE 35.00 => 3500)
+POST_FEE_CENTS=3500
+# Boost price in NLE cents per month
+BOOST_PRICE_CENTS=3500
