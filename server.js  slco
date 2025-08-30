@@ -28,7 +28,7 @@ failed' }); }
 });
 
 
-// Approve listing (e.g., News moderation)
+# Approve listing (e.g., News moderation)
 app.post('/admin/listings/:id/approve', auth(true), requireAdmin, async 
 (req, res) => {
 try {
@@ -61,7 +61,7 @@ listing failed' }); }
 });
 
 
-// --- Helper: seed an admin (one‑time)
+# --- Helper: seed an admin (one‑time)
 app.post('/dev/seed-admin', async (req, res) => {
 try {
 const { email, password } = req.body;
@@ -78,7 +78,7 @@ failed' }); }
 });
 
 
-// --- Start
+# --- Start
 app.listen(PORT, () => console.log(`Sleconomicmarket API running on 
 :${PORT}`));
 
