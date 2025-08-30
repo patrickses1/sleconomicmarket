@@ -1,5 +1,5 @@
 
-// Minimal “router”. Changes the main section based on #/path
+# Minimal “router”. Changes the main section based on #/path
 const el = (tag, attrs = {}, children = []) => {
   const node = document.createElement(tag);
   Object.entries(attrs).forEach(([k,v]) => {
